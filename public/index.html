@@ -3977,6 +3977,8 @@
 
                     // 5. 加载观看历史
                     this.loadWatchHistory();
+                    
+
                 },
 
                 // ========== 📺 观看历史功能 ==========
@@ -4793,88 +4795,17 @@
                     this.showInfoModal = true;
                 },
 
-                // 设置 TMDB 反代（针对大陆用户）
+                // 设置 TMDB 反代（总是使用配置的代理）
                 async setupTmdbProxy(proxyUrl) {
-                    let isCN = false;
-
-                    // 超时 fetch（fetch 原生不支持 timeout 选项，需用 AbortController）
-                    const fetchWithTimeout = async (url, timeoutMs = 3000) => {
-                        const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-                        try {
-                            const res = await fetch(url, { signal: controller.signal });
-                            clearTimeout(timeoutId);
-                            return res;
-                        } catch (e) {
-                            clearTimeout(timeoutId);
-                            throw e;
-                        }
-                    };
-
-                    try {
-                        // 1. 优先使用 ip.sb (国内访问稳定，无速率限制，返回标准 JSON)
-                        const res = await fetchWithTimeout('https://api.ip.sb/geoip', 3000);
-                        if (res.ok) {
-                            const data = await res.json();
-                            // 检查是否是中国大陆 (country_code = CN)
-                            // ip.sb 返回: { "country_code": "CN", "country": "China", ... }
-                            if (data.country_code === 'CN') {
-                                // 排除港澳台 (根据 region 或 city 判断)
-                                const excludeRegions = ['Hong Kong', 'Macau', 'Taiwan', '香港', '澳门', '台湾'];
-                                const region = data.region || data.city || '';
-                                if (!excludeRegions.some(r => region.includes(r))) {
-                                    isCN = true;
-                                }
-                            }
-                        } else {
-                            throw new Error('ip.sb Status: ' + res.status);
-                        }
-                    } catch (e) {
-                        // 2. 备选：pv.sohu.com（搜狐，国内速度快）
-                        console.log('[IP检测] ip.sb 失败，尝试搜狐接口...', e.message || e);
-                        try {
-                            const res = await fetchWithTimeout('https://pv.sohu.com/cityjson?ie=utf-8', 3000);
-                            if (res.ok) {
-                                const text = await res.text();
-                                // 响应格式: var returnCitySN = {"cip": "x.x.x.x", "cid": "...", "cname": "北京市"};
-                                const match = text.match(/cname\s*:\s*["']([^"']+)["']/);
-                                if (match) {
-                                    // 只要 cname 有值就认为是国内（搜狐接口只返回国内城市）
-                                    // 排除港澳台
-                                    const city = match[1];
-                                    const excludeRegions = ['香港', '澳门', '台湾'];
-                                    if (!excludeRegions.some(r => city.includes(r))) {
-                                        isCN = true;
-                                    }
-                                }
-                            } else {
-                                console.warn('[IP检测] 搜狐接口响应异常:', res.status);
-                            }
-                        } catch (e2) {
-                            // 3. 最终备选：Cloudflare Trace（国外用户）
-                            console.log('[IP检测] 搜狐接口失败，尝试 Cloudflare...', e2.message || e2);
-                            try {
-                                const res = await fetchWithTimeout('https://www.cloudflare.com/cdn-cgi/trace', 3000);
-                                if (res.ok) {
-                                    const text = await res.text();
-                                    const matches = text.match(/loc=([A-Z]+)/);
-                                    if (matches && matches[1] === 'CN') isCN = true;
-                                }
-                            } catch (e3) {
-                                console.warn('[IP检测] 所有接口均失败，跳过自动切换');
-                            }
-                        }
-                    }
-
-                    if (isCN) {
-                        console.log('[IP检测] 检测到大陆IP，启用TMDB反代:', proxyUrl);
-                        TMDB_BASE_URL = proxyUrl + '/3';
-                        TMDB_IMG_URL = proxyUrl + '/t/p/w342';
-                        TMDB_BACKDROP_URL = proxyUrl + '/t/p/original';
-                    } else {
-                        console.log('[IP检测] 非大陆IP或检测完成，保持官方地址');
-                    }
+                    // 移除proxyUrl末尾的斜杠（如果存在）
+                    const cleanProxyUrl = proxyUrl.replace(/\/$/, '');
+                    console.log('[TMDB反代] 已启用配置的代理:', cleanProxyUrl);
+                    TMDB_BASE_URL = cleanProxyUrl + '/api/3';
+                    TMDB_IMG_URL = cleanProxyUrl + '/t/p/w342';
+                    TMDB_BACKDROP_URL = cleanProxyUrl + '/t/p/original';
                 },
+
+
 
                 // 清理 HTML 标签
                 stripHtml(html) {

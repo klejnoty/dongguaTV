@@ -879,10 +879,10 @@ app.get('/api/tmdb-proxy', async (req, res) => {
         const clientIP = getClientIP(req);
         const TMDB_PROXY_URL = process.env['TMDB_PROXY_URL'];
 
-        // 只有配置了代理 URL 且用户来自中国大陆时，才使用代理
+        // 只要配置了代理 URL，就总是使用代理
         let useProxy = false;
         if (TMDB_PROXY_URL) {
-            useProxy = await isChineseIP(clientIP);
+            useProxy = true;
         }
 
         const TMDB_BASE = useProxy
@@ -1632,9 +1632,15 @@ function getDB() {
 // 本地/Docker 环境：启动服务器监听
 // Vercel 环境下不需要调用 listen()，它会自动处理
 if (!process.env.VERCEL) {
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
         console.log(`Server running on http://localhost:${PORT}`);
         console.log(`Image Cache Directory: ${IMAGE_CACHE_DIR}`);
+    });
+    
+    // 添加错误处理
+    server.on('error', (err) => {
+        console.error('Server error:', err);
+        process.exit(1);
     });
 }
 
