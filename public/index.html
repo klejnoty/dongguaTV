@@ -5796,7 +5796,11 @@
                     // 释放屏幕常亮
                     this.releaseWakeLock();
 
-                    // TV 模式：移除控制栏
+                    // TV 模式：清理自动隐藏计时器 + 移除控制栏
+                    if (window._tvCleanupAutoHide) {
+                        window._tvCleanupAutoHide();
+                        window._tvCleanupAutoHide = null;
+                    }
                     const tvControls = document.getElementById('tv-controls');
                     if (tvControls) tvControls.remove();
                     const tvBottomControls = document.getElementById('tv-bottom-controls');
@@ -7232,6 +7236,44 @@
                                     });
 
                                     console.log('[TV 模式] 按钮已添加');
+
+                                    // 5. 自动隐藏控制栏 (5秒无操作后淡出)
+                                    let tvHideTimer = null;
+                                    const TV_HIDE_DELAY = 5000;
+
+                                    const setControlsVisible = (visible) => {
+                                        const top = document.getElementById('tv-controls');
+                                        const bottom = document.getElementById('tv-bottom-controls');
+                                        [top, bottom].forEach(el => {
+                                            if (!el) return;
+                                            el.style.transition = 'opacity 0.5s ease';
+                                            el.style.opacity = visible ? '1' : '0';
+                                            el.style.pointerEvents = visible ? 'auto' : 'none';
+                                        });
+                                    };
+
+                                    const resetTvHideTimer = () => {
+                                        setControlsVisible(true);
+                                        clearTimeout(tvHideTimer);
+                                        tvHideTimer = setTimeout(() => setControlsVisible(false), TV_HIDE_DELAY);
+                                    };
+
+                                    // 监听用户交互事件以重置计时器
+                                    const tvInteractionEvents = ['keydown', 'mousemove', 'click', 'touchstart'];
+                                    tvInteractionEvents.forEach(evt => {
+                                        document.addEventListener(evt, resetTvHideTimer);
+                                    });
+
+                                    // 存储清理函数，供 closeDetail 调用
+                                    window._tvCleanupAutoHide = () => {
+                                        clearTimeout(tvHideTimer);
+                                        tvInteractionEvents.forEach(evt => {
+                                            document.removeEventListener(evt, resetTvHideTimer);
+                                        });
+                                    };
+
+                                    // 启动首次隐藏计时
+                                    resetTvHideTimer();
                                 }
 
                                 // 3. 让 DPlayer 控制按钮可获得焦点

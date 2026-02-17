@@ -899,42 +899,50 @@ docker run -d -p 3000:3000 \
 
 如果您 Fork 了本项目并希望永久修改默认配置：
 
-##### 📱 配置文件位置
+##### 📱 修改服务器地址
 
-| 配置文件路径 | App ID |
-|-------------|--------|
-| `capacitor.config.json` | `com.ednovas.donguatv` |
+编辑 `capacitor.config.json`，修改 `server.url`：
 
-只需修改 `server.url` 即可更改内置网站地址：
+```json
+{
+  "server": {
+    "url": "https://your-server.com",
+    "cleartext": true
+  }
+}
+```
 
-1.  编辑对应的 `capacitor.config.json`，修改 `server.url` 为您的服务器地址：
-    ```json
-    {
-      "appId": "com.ednovas.donguatv",
-      "appName": "E视界",
-      "webDir": "public",
-      "server": {
-        "url": "https://your-server.com",
-        "cleartext": true
-      }
-    }
-    ```
+##### 📱 修改 App 名称
 
-2.  提交更改并推送 Tag 触发自动构建：
-    ```bash
-    git add capacitor.config.json
-    git commit -m "修改服务器地址"
-    git tag v1.0.0
-    git push origin main --tags
-    ```
+> ⚠️ `capacitor.config.json` 中的 `appName` 字段**不会自动同步**到 Android 原生项目。必须直接修改 Android 文件。
 
-3.  或者本地手动构建：
-    ```bash
-    npm install
-    npx cap sync android
-    cd android && ./gradlew assembleRelease
-    ```
-    APK 位于 `android/app/build/outputs/apk/release/`
+编辑 `android/app/src/main/res/values/strings.xml`：
+```xml
+<resources>
+    <string name="app_name">你的应用名</string>
+    <string name="title_activity_main">你的应用名</string>
+    ...
+</resources>
+```
+
+##### 📱 修改版本号
+
+编辑 `android/app/build.gradle`，找到 `defaultConfig` 块：
+```groovy
+defaultConfig {
+    versionCode 2        // 整数，每次发版递增
+    versionName "1.1"    // 显示给用户的版本号
+}
+```
+
+##### 🏗️ 本地构建
+
+```bash
+npm install
+npx cap sync android
+cd android && ./gradlew assembleRelease
+```
+APK 位于 `android/app/build/outputs/apk/release/`
 
 #### ⚠️ App 使用问题与替代方案
 

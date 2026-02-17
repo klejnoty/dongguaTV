@@ -1289,7 +1289,13 @@ app.get('/api/tmdb-image/:size/:filename', async (req, res) => {
         return res.sendFile(localPath);
     }
 
-    // 2. 下载并缓存
+    // 2. 下载并缓存（支持 TMDB_PROXY_URL 代理）
+    let fetchUrl = tmdbUrl;
+    if (process.env['TMDB_PROXY_URL']) {
+        const proxyBase = process.env['TMDB_PROXY_URL'].replace(/\/$/, '');
+        fetchUrl = `${proxyBase}/t/p/${size}/${filename}`;
+    }
+
     if (!fs.existsSync(localDir)) {
         try {
             fs.mkdirSync(localDir, { recursive: true });
@@ -1297,16 +1303,16 @@ app.get('/api/tmdb-image/:size/:filename', async (req, res) => {
             console.error('[Cache Mkdir Error]', e.message);
             // 如果创建目录失败，降级为直接流式转发
             try {
-                const response = await axios({ url: tmdbUrl, method: 'GET', responseType: 'stream' });
+                const response = await axios({ url: fetchUrl, method: 'GET', responseType: 'stream' });
                 return response.data.pipe(res);
             } catch (err) { return res.status(404).send('Image not found'); }
         }
     }
 
     try {
-        console.log(`[Image Proxy] Fetching: ${tmdbUrl}`);
+        console.log(`[Image Proxy] Fetching: ${fetchUrl}`);
         const response = await axios({
-            url: tmdbUrl,
+            url: fetchUrl,
             method: 'GET',
             responseType: 'stream',
             timeout: 10000
@@ -1323,7 +1329,7 @@ app.get('/api/tmdb-image/:size/:filename', async (req, res) => {
         // 发送文件
         res.sendFile(localPath);
     } catch (error) {
-        console.error(`[Image Proxy Error] ${tmdbUrl}:`, error.message);
+        console.error(`[Image Proxy Error] ${fetchUrl}:`, error.message);
         if (fs.existsSync(localPath)) {
             try { fs.unlinkSync(localPath); } catch (e) { }
         }

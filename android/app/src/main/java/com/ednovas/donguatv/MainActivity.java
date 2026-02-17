@@ -148,36 +148,47 @@ public class MainActivity extends BridgeActivity {
     }
     
     // 📺 TV 遥控器返回键处理
+    @SuppressWarnings("deprecation")
     @Override
     public void onBackPressed() {
         WebView webView = getBridge().getWebView();
         if (webView != null) {
-            // 通过 JavaScript 直接关闭播放页面（包括退出全屏）
+            // 通过 JavaScript 处理完整的导航状态机：弹窗 → 播放页 → 搜索结果 → 退出
             webView.evaluateJavascript(
                 "(function() {" +
-                "  if (window.vueApp && window.vueApp.showDetail) {" +
-                "    // 如果在全屏，先退出全屏" +
-                "    if (window.vueApp.dp && window.vueApp.dp.fullScreen) {" +
-                "      try { window.vueApp.dp.fullScreen.cancel('web'); } catch(e) {}" +
+                "  try {" +
+                "    // 1. 关闭选集弹窗" +
+                "    var popup = document.getElementById('tv-episode-popup');" +
+                "    if (popup) {" +
+                "      popup.remove();" +
+                "      var epBtn = document.getElementById('tv-select-episode');" +
+                "      if (epBtn) epBtn.focus();" +
+                "      return 'closed_popup';" +
                 "    }" +
-                "    // 关闭播放页面" +
-                "    window.vueApp.closeDetail();" +
-                "    return 'closed';" +
-                "  }" +
-                "  return 'none';" +
+                "    // 2. 关闭播放页面（先退出全屏）" +
+                "    if (window.vueApp && window.vueApp.showDetail) {" +
+                "      if (typeof dp !== 'undefined' && dp && dp.fullScreen) {" +
+                "        try { dp.fullScreen.cancel('web'); } catch(e) {}" +
+                "      }" +
+                "      window.vueApp.closeDetail();" +
+                "      return 'closed_detail';" +
+                "    }" +
+                "    // 3. 从搜索结果返回首页" +
+                "    if (window.vueApp && window.vueApp.searched) {" +
+                "      window.vueApp.goHome();" +
+                "      return 'went_home';" +
+                "    }" +
+                "    // 4. 已在首页，交给系统退出" +
+                "    return 'exit';" +
+                "  } catch(e) { return 'exit'; }" +
                 "})()",
                 result -> {
-                    // 如果 JavaScript 返回 'none'，说明不在播放页面
-                    if (result != null && result.contains("none")) {
-                        // 检查 WebView 历史记录
-                        if (webView.canGoBack()) {
-                            webView.goBack();
-                        } else {
-                            // 退出应用
+                    if (result != null && result.contains("exit")) {
+                        runOnUiThread(() -> {
+                            // 首页按返回，退出应用
                             MainActivity.super.onBackPressed();
-                        }
+                        });
                     }
-                    // 'closed' 表示播放页面已关闭，不需要额外操作
                 }
             );
         } else {
