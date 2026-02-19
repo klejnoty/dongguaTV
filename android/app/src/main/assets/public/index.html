@@ -1827,6 +1827,11 @@
             overflow-y: auto;
         }
 
+        /* 播放页打开时禁止底层页面滚动，避免双滚动条 */
+        body.detail-open {
+            overflow: hidden !important;
+        }
+
         .detail-overlay.active {
             display: block;
             animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
@@ -3400,7 +3405,18 @@
 
                     <!-- 选集列表 (全宽网格) -->
                     <div>
-                        <div class="panel-title">选集播放</div>
+                        <div class="panel-title" style="display: flex; align-items: center;">
+                            选集播放
+                            <span @click="refreshEpisodes"
+                                style="margin-left: 10px; font-size: 12px; color: #888; cursor: pointer; padding: 2px 8px; border-radius: 4px; border: 1px solid #444; transition: all 0.2s;"
+                                :style="{ opacity: refreshingEpisodes ? 0.5 : 1, pointerEvents: refreshingEpisodes ? 'none' : 'auto' }"
+                                @mouseenter="$event.target.style.color='#fff'; $event.target.style.borderColor='#888'"
+                                @mouseleave="$event.target.style.color='#888'; $event.target.style.borderColor='#444'">
+                                <i :class="['fas', refreshingEpisodes ? 'fa-spinner fa-spin' : 'fa-sync-alt']"
+                                    style="margin-right: 4px;"></i>
+                                {{ refreshingEpisodes ? '刷新中...' : '刷新集数' }}
+                            </span>
+                        </div>
                         <div v-if="loadingDetail" class="text-center py-5 text-muted"><i
                                 class="fas fa-spinner fa-spin"></i>
                             加载中...</div>
@@ -3622,6 +3638,49 @@
         // TMDB 反代配置现在通过环境变量 TMDB_PROXY_URL 配置
         // 详见 .env.example 和 cloudflare-tmdb-proxy.js
 
+        // 客户端公网 IP（用于帮助服务端判断是否需要代理）
+        let clientPublicIP = null;
+
+        /**
+         * 获取客户端公网 IP (用于内网部署场景)
+         * 在页面加载时调用一次，结果缓存到 clientPublicIP
+         */
+        async function fetchClientPublicIP() {
+            try {
+                const response = await fetch('https://api.ip.sb/ip', {
+                    timeout: 5000,
+                    cache: 'no-store'
+                });
+                if (response.ok) {
+                    const ip = (await response.text()).trim();
+                    if (ip && /^[\d\.]+$/.test(ip)) {  // 简单校验 IPv4 格式
+                        clientPublicIP = ip;
+                        console.log('[IP Detection] Client public IP:', ip);
+                    }
+                }
+            } catch (e) {
+                console.warn('[IP Detection] Failed to get public IP:', e.message);
+                // 失败不阻塞，服务端会根据私有 IP 回退处理
+            }
+        }
+
+        /**
+         * TMDB 专用 fetch 包装器，自动注入 X-Client-Public-IP 头
+         * @param {string} url - 请求 URL
+         * @param {object} options - fetch 选项
+         * @returns {Promise<Response>}
+         */
+        function tmdbFetch(url, options = {}) {
+            const headers = new Headers(options.headers || {});
+            if (clientPublicIP) {
+                headers.set('X-Client-Public-IP', clientPublicIP);
+            }
+            return fetch(url, { ...options, headers });
+        }
+
+        // 页面加载时获取公网 IP（后台执行，不阻塞）
+        fetchClientPublicIP();
+
         let dp = null;
 
         createApp({
@@ -3629,6 +3688,7 @@
                 return {
                     searchTimer: null,  // 防抖搜索定时器
                     isTestingSources: false,  // 正在测速状态
+                    refreshingEpisodes: false,  // 刷新集数中
                     showInfoModal: false,  // 电影详情弹窗
                     infoModalData: null,   // 弹窗数据
                     TMDB_IMG_URL: TMDB_IMG_URL,  // 模板中使用
@@ -4403,6 +4463,7 @@
                             name: groupData.name,
                             pic: groupData.pic,
                             sources: groupData.sources.map((s, idx) => ({
+                                vod_id: s.vod_id,  // 用于刷新集数
                                 vod_name: s.vod_name,
                                 vod_pic: s.vod_pic,
                                 vod_play_url: s.vod_play_url,
@@ -4643,6 +4704,7 @@
                         this.currentSource = bestSource;
 
                         this.showDetail = true;
+                        document.body.classList.add('detail-open');
 
                         if (bestSource && bestSource.vod_play_url) {
                             // 解析播放地址（只从这一个资源站取）
@@ -4672,6 +4734,8 @@
                                 await this.$nextTick();
                                 if (targetEpisode && targetEpisode.url) {
                                     this.play(targetEpisode.url, bestSource.site_name);
+                                    // 后台自动刷新集数（不阻塞播放）
+                                    this.refreshEpisodes();
                                     return;
                                 }
                             }
@@ -5182,7 +5246,7 @@
                     }
 
                     const url = `/api/tmdb-proxy?path=${encodeURIComponent(config.path)}&page=${config.page}&${config.params}${sortParam}`;
-                    return fetch(url)
+                    return tmdbFetch(url)
                         .then(res => res.json())
                         .then(data => {
                             if (data.results) {
@@ -5327,7 +5391,7 @@
                             }
                         }
                         const url = `/api/tmdb-proxy?path=${encodeURIComponent('/discover/' + type)}&page=${page}&sort_by=popularity.desc&with_genres=${genres[genreIndex]}${adultParam}`;
-                        randomRequests.push(fetch(url).then(res => res.json()));
+                        randomRequests.push(tmdbFetch(url).then(res => res.json()));
                     }
 
                     try {
@@ -5366,7 +5430,7 @@
                 },
 
                 fetchHero() {
-                    return fetch(`/api/tmdb-proxy?path=${encodeURIComponent('/trending/all/week')}`)
+                    return tmdbFetch(`/api/tmdb-proxy?path=${encodeURIComponent('/trending/all/week')}`)
                         .then(res => res.json())
                         .then(data => {
                             if (data.results) {
@@ -5395,7 +5459,7 @@
                     if (this.imageMap[name] || this.fallbackMap[name]) return;
                     this.fallbackMap[name] = true;
                     let cleanName = name.replace(/第[0-9一二三四五六七八九十]+[季部]/g, '').replace(/Season\s*\d+/ig, '').replace(/S\d{1,2}/ig, '').replace(/(HD|BD|1080P|720P|4K|202\d|TC|TS).*/i, '').trim();
-                    fetch(`/api/tmdb-proxy?path=${encodeURIComponent('/search/multi')}&query=${encodeURIComponent(cleanName)}`)
+                    tmdbFetch(`/api/tmdb-proxy?path=${encodeURIComponent('/search/multi')}&query=${encodeURIComponent(cleanName)}`)
                         .then(res => res.json()).then(data => {
                             if (data.results && data.results.length > 0) {
                                 const found = data.results.find(i => i.poster_path) || data.results[0];
@@ -5475,6 +5539,7 @@
                 async openDetail(group) {
                     this.currentGroup = group;
                     this.showDetail = true;
+                    document.body.classList.add('detail-open');
                     this.isTestingSources = true;  // 开始测速
                     this.currentSource = null;  // 确保清空之前的选择
                     this.episodeList = [];
@@ -5748,12 +5813,17 @@
                 },
                 closeDetail() {
                     this.showDetail = false;
+                    document.body.classList.remove('detail-open');
                     if (dp) dp.pause();
 
                     // 释放屏幕常亮
                     this.releaseWakeLock();
 
-                    // TV 模式：移除控制栏
+                    // TV 模式：清理自动隐藏计时器 + 移除控制栏
+                    if (window._tvCleanupAutoHide) {
+                        window._tvCleanupAutoHide();
+                        window._tvCleanupAutoHide = null;
+                    }
                     const tvControls = document.getElementById('tv-controls');
                     if (tvControls) tvControls.remove();
                     const tvBottomControls = document.getElementById('tv-bottom-controls');
@@ -5810,6 +5880,84 @@
                         }
                     } catch (e) { console.log('[切换资源] 错误:', e); }
                     this.loadingDetail = false;
+                },
+
+                // 🔄 强制刷新集数列表（绕过所有缓存）
+                async refreshEpisodes() {
+                    if (!this.currentSource || this.refreshingEpisodes) return;
+                    this.refreshingEpisodes = true;
+                    try {
+                        const source = this.currentSource;
+                        let vodId = source.vod_id;
+
+                        // 如果 vod_id 不存在（旧版历史记录），通过搜索获取
+                        if (!vodId && this.currentGroup?.name) {
+                            console.log('[刷新集数] vod_id 缺失，通过搜索获取...');
+                            try {
+                                const searchRes = await fetch(`/api/search?wd=${encodeURIComponent(this.currentGroup.name)}&site_key=${encodeURIComponent(source.site_key)}`);
+                                const searchData = await searchRes.json();
+                                if (searchData.list && searchData.list.length > 0) {
+                                    // 找到匹配当前 site_key 的结果
+                                    const match = searchData.list.find(item =>
+                                        item.site_key === source.site_key && item.vod_name === this.currentGroup.name
+                                    );
+                                    if (match) {
+                                        vodId = match.vod_id;
+                                        source.vod_id = vodId;  // 缓存以备后用
+                                        console.log('[刷新集数] 通过搜索找到 vod_id:', vodId);
+                                    }
+                                }
+                            } catch (searchErr) {
+                                console.warn('[刷新集数] 搜索获取 vod_id 失败:', searchErr);
+                            }
+                        }
+
+                        if (!vodId) {
+                            console.warn('[刷新集数] 无法获取 vod_id，跳过刷新');
+                            this.refreshingEpisodes = false;
+                            return;
+                        }
+
+                        // 带 nocache 参数，通知服务器跳过缓存
+                        const res = await fetch(`/api/detail?site_key=${source.site_key}&id=${vodId}&nocache=1`);
+                        const data = await res.json();
+                        if (data.list && data.list.length > 0) {
+                            const detail = data.list[0];
+                            const oldCount = this.episodeList.length;
+                            // 更新缓存
+                            source._cachedDetail = detail;
+                            source.vod_play_url = detail.vod_play_url;
+                            source.vod_content = detail.vod_content || detail.vod_blurb || '';
+                            // 记住当前正在播放的集数
+                            const currentEpName = this.episodeList?.find(ep => ep.url === this.currentUrl)?.name;
+                            // 重新解析集数列表（不自动切换集数，仅更新列表）
+                            let playSource = detail.vod_play_url || '';
+                            if (playSource.includes('$$$')) {
+                                const sets = playSource.split('$$$');
+                                playSource = sets.find(s => s.toLowerCase().includes('m3u8')) || sets[0];
+                            }
+                            this.episodeList = playSource.split('#').map(ep => {
+                                const p = ep.split('$');
+                                return { name: p.length > 1 ? p[0] : '正片', url: p.length > 1 ? p[1] : p[0] };
+                            });
+                            const newCount = this.episodeList.length;
+                            console.log(`[刷新集数] 成功，${oldCount} → ${newCount} 集`);
+                            // 更新历史记录中的数据（防止下次从历史播放又用旧数据）
+                            if (this.currentGroup) {
+                                const groupSource = this.currentGroup.sources?.find(s => s.site_key === source.site_key);
+                                if (groupSource) {
+                                    groupSource.vod_play_url = detail.vod_play_url;
+                                    groupSource._cachedDetail = detail;
+                                    groupSource.vod_id = vodId;  // 保存 vod_id
+                                }
+                            }
+                        } else {
+                            console.warn('[刷新集数] 未获取到数据');
+                        }
+                    } catch (e) {
+                        console.error('[刷新集数] 失败:', e);
+                    }
+                    this.refreshingEpisodes = false;
                 },
 
                 // 解析剧集列表，尝试匹配指定集数
@@ -7189,6 +7337,44 @@
                                     });
 
                                     console.log('[TV 模式] 按钮已添加');
+
+                                    // 5. 自动隐藏控制栏 (5秒无操作后淡出)
+                                    let tvHideTimer = null;
+                                    const TV_HIDE_DELAY = 5000;
+
+                                    const setControlsVisible = (visible) => {
+                                        const top = document.getElementById('tv-controls');
+                                        const bottom = document.getElementById('tv-bottom-controls');
+                                        [top, bottom].forEach(el => {
+                                            if (!el) return;
+                                            el.style.transition = 'opacity 0.5s ease';
+                                            el.style.opacity = visible ? '1' : '0';
+                                            el.style.pointerEvents = visible ? 'auto' : 'none';
+                                        });
+                                    };
+
+                                    const resetTvHideTimer = () => {
+                                        setControlsVisible(true);
+                                        clearTimeout(tvHideTimer);
+                                        tvHideTimer = setTimeout(() => setControlsVisible(false), TV_HIDE_DELAY);
+                                    };
+
+                                    // 监听用户交互事件以重置计时器
+                                    const tvInteractionEvents = ['keydown', 'mousemove', 'click', 'touchstart'];
+                                    tvInteractionEvents.forEach(evt => {
+                                        document.addEventListener(evt, resetTvHideTimer);
+                                    });
+
+                                    // 存储清理函数，供 closeDetail 调用
+                                    window._tvCleanupAutoHide = () => {
+                                        clearTimeout(tvHideTimer);
+                                        tvInteractionEvents.forEach(evt => {
+                                            document.removeEventListener(evt, resetTvHideTimer);
+                                        });
+                                    };
+
+                                    // 启动首次隐藏计时
+                                    resetTvHideTimer();
                                 }
 
                                 // 3. 让 DPlayer 控制按钮可获得焦点

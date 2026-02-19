@@ -451,7 +451,36 @@ app.get('/api/search', async (req, res) => {
     }
 
     if (!stream) {
-        return res.json({ error: 'Use stream=true for search' });
+        // 非流式模式：返回聚合的 JSON 结果（用于 refreshEpisodes 查找 vod_id）
+        const siteKey = req.query.site_key;  // 可选：只搜索指定站点
+        const targetSites = siteKey ? sites.filter(s => s.key === siteKey) : sites;
+
+        const allResults = [];
+        const searchPromises = targetSites.map(async (site) => {
+            try {
+                const response = await axios.get(site.api, {
+                    params: { ac: 'detail', wd: keyword },
+                    timeout: 8000
+                });
+                const data = response.data;
+                if (data.list) {
+                    data.list.forEach(item => {
+                        allResults.push({
+                            vod_id: item.vod_id,
+                            vod_name: item.vod_name,
+                            vod_pic: item.vod_pic,
+                            vod_play_url: item.vod_play_url,
+                            site_key: site.key,
+                            site_name: site.name
+                        });
+                    });
+                }
+            } catch (err) {
+                console.error(`[Search JSON] ${site.name}:`, err.message);
+            }
+        });
+        await Promise.all(searchPromises);
+        return res.json({ list: allResults });
     }
 
     // SSE 流式响应
