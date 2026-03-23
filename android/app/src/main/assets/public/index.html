@@ -61,7 +61,7 @@
     <!-- SW 版本检测和强制更新（必须在最开头） -->
     <script data-cfasync="false">
         (function () {
-            var REQUIRED_SW_VERSION = 'v20';
+            var REQUIRED_SW_VERSION = 'v23';
             var STORAGE_KEY = 'sw_cleared_' + REQUIRED_SW_VERSION;
 
             // 如果已经为这个版本清理过，不再重复
@@ -129,7 +129,7 @@
 
     <!-- 非关键脚本 (延迟加载) -->
     <script data-cfasync="false" src="libs/js/hls.min.js" defer></script>
-    <script data-cfasync="false" src="libs/js/ad-filter.js" defer></script>
+    <script data-cfasync="false" src="libs/js/ad-filter.js?v=2.1" defer></script>
     <script data-cfasync="false" src="libs/js/DPlayer.min.js" defer></script>
     <script data-cfasync="false" src="libs/js/bootstrap.bundle.min.js" defer></script>
 
@@ -3180,9 +3180,12 @@
                 <i class="fas fa-cog"></i>
                 <span>偏好设置</span>
             </div>
-            <!-- 隐藏的退出登录按钮：连续点击3次退出 -->
-            <div style="font-size:10px; margin-top:5px; opacity:0.5; cursor: default; user-select: none;"
-                @click="handleFooterClick" :title="footerClickCount >= 2 ? '再点击1次退出登录' : ''">
+            <!-- 退出登录按钮 -->
+            <div class="tv-mode-toggle" @click="confirmLogout" style="margin-top: 10px;" title="退出登录">
+                <i class="fas fa-sign-out-alt"></i>
+                <span>退出登录</span>
+            </div>
+            <div style="font-size:10px; margin-top:12px; opacity:0.5; user-select: none;">
                 Data provided by TMDb & Maccms APIs
             </div>
         </div>
@@ -3683,6 +3686,32 @@
 
         let dp = null;
 
+        // 💾 倍速恢复辅助 — 多次重试确保 HLS.js 不会重置
+        function ensurePlaybackSpeed(player) {
+            try {
+                const savedSpeed = parseFloat(localStorage.getItem('dplayer_speed'));
+                if (!savedSpeed || isNaN(savedSpeed) || savedSpeed === 1) return;
+                if (!player || !player.video) return;
+
+                const applySpeed = () => {
+                    if (player.video && Math.abs(player.video.playbackRate - savedSpeed) > 0.01) {
+                        player.speed(savedSpeed);
+                    }
+                };
+
+                applySpeed();
+                setTimeout(applySpeed, 200);
+                setTimeout(applySpeed, 500);
+                setTimeout(applySpeed, 1500);
+
+                const onPlaying = () => {
+                    applySpeed();
+                    player.video.removeEventListener('playing', onPlaying);
+                };
+                player.video.addEventListener('playing', onPlaying);
+            } catch (e) { }
+        }
+
         createApp({
             data() {
                 return {
@@ -3773,7 +3802,7 @@
                     syncStatus: 'idle',  // 同步状态: idle, syncing, success, error
                     syncToken: '',  // 用户同步 Token (密码哈希)
                     lastSyncTime: 0,  // 上次同步时间戳
-                    footerClickCount: 0,  // 用于隐蔽退出登录的点击计数
+                    // footerClickCount removed (now using visible logout button)
 
                     rowLeftButtons: {}, // 存储各分类榜单左侧按钮显示状态 { movieRow: false, ... }
 
@@ -4611,22 +4640,7 @@
                     }
                 },
 
-                // 页脚隐蔽退出（连续点击3次触发）
-                handleFooterClick() {
-                    this.footerClickCount++;
-
-                    // 2秒内没有继续点击则重置计数
-                    clearTimeout(this._footerClickTimer);
-                    this._footerClickTimer = setTimeout(() => {
-                        this.footerClickCount = 0;
-                    }, 2000);
-
-                    // 点击3次触发退出确认
-                    if (this.footerClickCount >= 3) {
-                        this.footerClickCount = 0;
-                        this.confirmLogout();
-                    }
-                },
+                // handleFooterClick removed (now using visible logout button)
 
                 // 格式化观看时间
                 formatWatchTime(isoString) {
@@ -5109,7 +5123,7 @@
                                 console.log('[投屏] 无法显示投屏菜单:', err);
 
                                 // 只有在明确报错无法显示菜单时，才提示用户
-                                alert('无可用投屏设备或浏览器受限。\n\n1. 请确保电视/投影已开机并连接同一WiFi\n2. 确保通过 HTTPS 访问\n3. 或使用浏览器菜单中的"投射"功能');
+                                alert('未找到投屏设备。\n\n请先在手机下拉通知栏 → 点击「投屏/Cast」→ 搜索并连接您的电视，连接成功后再点击一键投屏即可。');
                             });
                         return;
                     }
@@ -6036,7 +6050,48 @@
                             volume: 0.8,             // 默认音量 80%
                             loop: false,             // 循环播放（可在设置中切换）
                             playbackSpeed: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3],  // 0.25间隔倍速选项
-                            video: { url: finalUrl, type: 'hls' },
+                            video: {
+                                url: finalUrl,
+                                type: 'customHls',
+                                customType: {
+                                    customHls: function(video, player) {
+                                        // 先清理旧的 HLS 实例
+                                        if (window._hlsInstance) {
+                                            window._hlsInstance.destroy();
+                                            window._hlsInstance = null;
+                                        }
+                                        // 使用广告过滤 loader 创建 HLS 实例
+                                        var hlsConfig = {};
+                                        if (window.AdFilter && window.AdFilter.getFilteredLoaderClass) {
+                                            hlsConfig.loader = window.AdFilter.getFilteredLoaderClass();
+                                            console.log('[播放器] 🛡️ 已启用广告过滤 loader');
+                                        }
+                                        var hls = new Hls(hlsConfig);
+                                        hls.loadSource(video.src);
+                                        hls.attachMedia(video);
+                                        // HLS 错误恢复
+                                        hls.on(Hls.Events.ERROR, function(event, data) {
+                                            if (data.fatal) {
+                                                switch (data.type) {
+                                                    case Hls.ErrorTypes.NETWORK_ERROR:
+                                                        console.warn('[HLS] 网络错误，尝试恢复...');
+                                                        hls.startLoad();
+                                                        break;
+                                                    case Hls.ErrorTypes.MEDIA_ERROR:
+                                                        console.warn('[HLS] 媒体错误，尝试恢复...');
+                                                        hls.recoverMediaError();
+                                                        break;
+                                                    default:
+                                                        console.error('[HLS] 致命错误，无法恢复');
+                                                        hls.destroy();
+                                                        break;
+                                                }
+                                            }
+                                        });
+                                        window._hlsInstance = hls;
+                                    }
+                                }
+                            },
                             contextmenu: [
                                 { text: '🎬 E视界MAX', link: '/' },
                                 { text: '⚡ 当前速度: 1x', click: () => { } }
@@ -6811,14 +6866,7 @@
                         let progressRestored = false;
                         dp.on('canplay', () => {
                             // 💾 恢复倍速设置 (每次视频加载都检查)
-                            try {
-                                const savedSpeed = parseFloat(localStorage.getItem('dplayer_speed'));
-                                if (savedSpeed && !isNaN(savedSpeed) && dp.video) {
-                                    if (Math.abs(dp.video.playbackRate - savedSpeed) > 0.01) {
-                                        dp.speed(savedSpeed);
-                                    }
-                                }
-                            } catch (e) { }
+                            ensurePlaybackSpeed(dp);
 
                             if (progressRestored) return;
 
@@ -7013,7 +7061,42 @@
 
                         let progressRestored = false;
 
-                        dp.switchVideo({ url: finalUrl, type: 'hls' });
+                        dp.switchVideo({
+                            url: finalUrl,
+                            type: 'customHls',
+                            customType: {
+                                customHls: function(video, player) {
+                                    if (window._hlsInstance) {
+                                        window._hlsInstance.destroy();
+                                        window._hlsInstance = null;
+                                    }
+                                    var hlsConfig = {};
+                                    if (window.AdFilter && window.AdFilter.getFilteredLoaderClass) {
+                                        hlsConfig.loader = window.AdFilter.getFilteredLoaderClass();
+                                        console.log('[播放器] 🛡️ 已启用广告过滤 loader (切换)');
+                                    }
+                                    var hls = new Hls(hlsConfig);
+                                    hls.loadSource(video.src);
+                                    hls.attachMedia(video);
+                                    hls.on(Hls.Events.ERROR, function(event, data) {
+                                        if (data.fatal) {
+                                            switch (data.type) {
+                                                case Hls.ErrorTypes.NETWORK_ERROR:
+                                                    hls.startLoad();
+                                                    break;
+                                                case Hls.ErrorTypes.MEDIA_ERROR:
+                                                    hls.recoverMediaError();
+                                                    break;
+                                                default:
+                                                    hls.destroy();
+                                                    break;
+                                            }
+                                        }
+                                    });
+                                    window._hlsInstance = hls;
+                                }
+                            }
+                        });
                         console.log('[进度记忆-切换] switchVideo 已调用' + (finalUrl !== url ? ' (代理模式)' : ''));
 
                         // 恢复新视频的进度
@@ -7022,15 +7105,7 @@
                             console.log('[进度记忆-切换] progressRestored:', progressRestored);
 
                             // 💾 恢复倍速设置 (每次切换视频都检查)
-                            try {
-                                const savedSpeed = parseFloat(localStorage.getItem('dplayer_speed'));
-                                if (savedSpeed && !isNaN(savedSpeed) && dp.video) {
-                                    if (Math.abs(dp.video.playbackRate - savedSpeed) > 0.01) {
-                                        dp.speed(savedSpeed);
-                                        console.log('[倍速恢复] 切换视频后恢复倍速:', savedSpeed + 'x');
-                                    }
-                                }
-                            } catch (e) { }
+                            ensurePlaybackSpeed(dp);
 
                             if (progressRestored) {
                                 console.log('[进度记忆-切换] 已恢复过，跳过');
