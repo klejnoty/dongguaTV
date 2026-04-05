@@ -129,7 +129,7 @@
 
     <!-- 非关键脚本 (延迟加载) -->
     <script data-cfasync="false" src="libs/js/hls.min.js" defer></script>
-    <script data-cfasync="false" src="libs/js/ad-filter.js?v=2.1" defer></script>
+    <script data-cfasync="false" src="libs/js/ad-filter.js?v=4.0" defer></script>
     <script data-cfasync="false" src="libs/js/DPlayer.min.js" defer></script>
     <script data-cfasync="false" src="libs/js/bootstrap.bundle.min.js" defer></script>
 
@@ -2654,6 +2654,7 @@
             cursor: pointer;
         }
 
+
         /* ========== Firefox Android 闪烁修复 ========== */
         /* 在移动端禁用可能导致渲染问题的效果 */
         @media (max-width: 768px),
@@ -2863,7 +2864,7 @@
                     <img src="icon.png" style="height: 32px; margin-right: 8px; border-radius: 8px;">视界 <span
                         style="font-size:1rem; -webkit-text-fill-color: #fff; opacity:0.8;">MAX</span>
                 </div>
-                <div class="password-logo-subtitle"><i class="fas fa-lock"></i> 需要密码才能访问</div>
+                <div class="password-logo-subtitle"><i class="fas fa-shield-alt"></i> 需要密码才能访问</div>
             </div>
 
             <div id="password-error" class="password-error" style="display: none;">
@@ -3170,22 +3171,24 @@
         </div>
 
         <div class="footer">
-            <!-- TV 模式开关 (非 TV 模式时显示，用于开启) -->
-            <div v-if="!isTVMode" class="tv-mode-toggle" @click="toggleTVMode" title="切换到TV模式（遥控器导航）">
-                <i class="fas fa-tv"></i>
-                <span>开启 TV 模式</span>
+            <div style="display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;">
+                <!-- TV 模式开关 (非 TV 模式时显示，用于开启) -->
+                <div v-if="!isTVMode" class="tv-mode-toggle" @click="toggleTVMode" title="切换到TV模式（遥控器导航）">
+                    <i class="fas fa-tv"></i>
+                    <span>开启 TV 模式</span>
+                </div>
+                <!-- 设置按钮 -->
+                <div class="tv-mode-toggle" @click="showSettingsModal = true" title="偏好设置">
+                    <i class="fas fa-cog"></i>
+                    <span>偏好设置</span>
+                </div>
+                <!-- 退出登录按钮 -->
+                <div class="tv-mode-toggle" @click="confirmLogout" title="退出登录">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>退出登录</span>
+                </div>
             </div>
-            <!-- 设置按钮 -->
-            <div class="tv-mode-toggle" @click="showSettingsModal = true" style="margin-top: 10px;" title="偏好设置">
-                <i class="fas fa-cog"></i>
-                <span>偏好设置</span>
-            </div>
-            <!-- 退出登录按钮 -->
-            <div class="tv-mode-toggle" @click="confirmLogout" style="margin-top: 10px;" title="退出登录">
-                <i class="fas fa-sign-out-alt"></i>
-                <span>退出登录</span>
-            </div>
-            <div style="font-size:10px; margin-top:12px; opacity:0.5; user-select: none;">
+            <div style="font-size:10px; margin-top:10px; opacity:0.5; user-select: none;">
                 Data provided by TMDb & Maccms APIs
             </div>
         </div>
@@ -3199,6 +3202,7 @@
                     <h2 style="color: #fff; margin-bottom: 25px; font-size: 1.5rem;">
                         <i class="fas fa-cog" style="margin-right: 10px; color: #e50914;"></i>偏好设置
                     </h2>
+
 
                     <!-- 随机盲盒开关 -->
                     <div
@@ -3319,10 +3323,20 @@
 
                     <!-- 线路选择 -->
                     <div class="mb-4">
-                        <div class="panel-title">
+                        <div class="panel-title" style="display: flex; align-items: center;">
                             切换线路
-                            <span v-if="isTestingSources" style="font-size: 12px; color: #888; font-weight: normal;">
+                            <span v-if="isTestingSources"
+                                style="font-size: 12px; color: #888; font-weight: normal; margin-left: 10px;">
                                 <i class="fas fa-spinner fa-spin"></i> 正在测速...
+                            </span>
+                            <span v-else @click="refreshSources"
+                                style="margin-left: 10px; font-size: 12px; color: #888; cursor: pointer; padding: 2px 8px; border-radius: 4px; border: 1px solid #444; transition: all 0.2s;"
+                                :style="{ opacity: refreshingSources ? 0.5 : 1, pointerEvents: refreshingSources ? 'none' : 'auto' }"
+                                @mouseenter="$event.target.style.color='#fff'; $event.target.style.borderColor='#888'"
+                                @mouseleave="$event.target.style.color='#888'; $event.target.style.borderColor='#444'">
+                                <i :class="['fas', refreshingSources ? 'fa-spinner fa-spin' : 'fa-sync-alt']"
+                                    style="margin-right: 4px;"></i>
+                                {{ refreshingSources ? '刷新中...' : '刷新线路' }}
                             </span>
                         </div>
 
@@ -3437,17 +3451,8 @@
 
     </div>
 
-    <!-- Password Verification Script (runs before Vue) -->
+    <!-- Auth Verification Script (runs before Vue) -->
     <script data-cfasync="false">
-        // SHA256 Hash Function (Pure JS implementation)
-        // SHA256 Hash Function (No longer used on client-side to avoid browser compat issues)
-        // async function sha256(message) {
-        //     const msgBuffer = new TextEncoder().encode(message);
-        //     const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-        //     const hashArray = Array.from(new Uint8Array(hashBuffer));
-        //     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        // }
-
         // Storage Keys
         const AUTH_STORAGE_KEY = 'emax_auth_hash';
         const AUTH_EXPIRY_KEY = 'emax_auth_expiry';
@@ -3493,7 +3498,15 @@
             errorDiv.style.display = 'flex';
         }
 
-        // Handle password submit
+        // Hide login screen with animation
+        function hideLoginScreen() {
+            const screen = document.getElementById('password-screen');
+            screen.classList.add('hidden');
+            setTimeout(() => {
+                screen.style.display = 'none';
+            }, 500);
+        }
+
         async function handlePasswordSubmit(event) {
             event.preventDefault();
 
@@ -3502,18 +3515,11 @@
             const remember = document.getElementById('remember-password').checked;
             const errorDiv = document.getElementById('password-error');
 
-            // Hide previous error
             errorDiv.style.display = 'none';
-
-            // Disable button
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>验证中...</span>';
 
             try {
-                // Skip client-side hashing to avoid browser compatibility issues
-                // const passwordHash = await sha256(input.value);
-
-                // Verify with server (send plain password)
                 const res = await fetch('/api/auth/verify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -3523,33 +3529,22 @@
                 const data = await res.json();
 
                 if (data.success) {
-                    // 始终保存 Token 用于同步功能
                     localStorage.setItem(AUTH_STORAGE_KEY, data.passwordHash);
 
-                    // 如果勾选了"记住登录"，设置长期有效期
                     if (remember) {
-                        const expiry = Date.now() + (365 * 24 * 60 * 60 * 1000); // 365 days
+                        const expiry = Date.now() + (365 * 24 * 60 * 60 * 1000);
                         localStorage.setItem(AUTH_EXPIRY_KEY, expiry.toString());
                     } else {
-                        // 不记住登录：设置会话有效期（浏览器关闭后）- 使用 sessionStorage 标记
                         sessionStorage.setItem('emax_session_only', 'true');
-                        // 设置短期有效期（1天），下次打开页面时会重新验证
                         const expiry = Date.now() + (24 * 60 * 60 * 1000);
                         localStorage.setItem(AUTH_EXPIRY_KEY, expiry.toString());
                     }
 
-                    // Start App and wait for data
                     if (window.startApp) {
                         await window.startApp();
                     }
 
-                    // Hide password screen with animation
-                    const screen = document.getElementById('password-screen');
-                    screen.classList.add('hidden');
-
-                    setTimeout(() => {
-                        screen.style.display = 'none';
-                    }, 500);
+                    hideLoginScreen();
                 } else {
                     showPasswordError('密码错误，请重试');
                     input.value = '';
@@ -3560,65 +3555,71 @@
                 console.error('Auth error:', e);
             }
 
-            // Re-enable button
             submitBtn.disabled = false;
             submitBtn.innerHTML = '<i class="fas fa-unlock"></i><span>验证密码</span>';
-
             return false;
         }
 
-        // Check auth status on page load
+        // ========== 页面加载认证检查 ==========
         async function checkAuthStatus() {
             try {
                 const res = await fetch('/api/auth/check');
                 const data = await res.json();
 
                 if (!data.requirePassword) {
-                    // No password required, start app directly
                     window.startApp && window.startApp();
                     return;
                 }
 
-                // Password required, check if already authenticated
-                const storedHash = isAuthenticated();
-                if (storedHash) {
-                    // Verify stored hash is still valid
-                    const verifyRes = await fetch('/api/auth/verify', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ passwordHash: storedHash })
-                    });
-                    const verifyData = await verifyRes.json();
+                const storedHash = localStorage.getItem(AUTH_STORAGE_KEY);
+                const expiry = localStorage.getItem(AUTH_EXPIRY_KEY);
 
-                    if (verifyData.success) {
-                        // Stored auth is valid, start app
-                        window.startApp && window.startApp();
-                        return;
-                    } else {
-                        // Stored auth is invalid, clear it
-                        localStorage.removeItem(AUTH_STORAGE_KEY);
-                        localStorage.removeItem(AUTH_EXPIRY_KEY);
+                // 有缓存的认证信息
+                if (storedHash && expiry) {
+                    const isExpired = Date.now() > parseInt(expiry);
+
+                    if (!isExpired) {
+                        // 验证 hash 是否仍然有效
+                        const verifyRes = await fetch('/api/auth/verify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ passwordHash: storedHash })
+                        });
+                        const verifyData = await verifyRes.json();
+
+                        if (verifyData.success) {
+                            window.startApp && window.startApp();
+                            return;
+                        }
                     }
+
+                    // 密码验证失败或过期
+                    clearAuthState();
                 }
 
-                // Show password screen
-                const loader = document.getElementById('app-loader');
-                const screen = document.getElementById('password-screen');
-
-                // Hide loader, show password screen
-                if (loader) loader.classList.add('hidden');
-                screen.style.display = 'flex';
-
-                // Focus input
-                setTimeout(() => {
-                    document.getElementById('password-input').focus();
-                }, 100);
+                // 显示登录页面
+                showLoginScreen();
 
             } catch (e) {
                 console.error('Auth check error:', e);
-                // On error, try to start app anyway
                 window.startApp && window.startApp();
             }
+        }
+
+        // 清除认证状态
+        function clearAuthState() {
+            localStorage.removeItem(AUTH_STORAGE_KEY);
+            localStorage.removeItem(AUTH_EXPIRY_KEY);
+        }
+
+        // 显示登录页面
+        function showLoginScreen() {
+            const loader = document.getElementById('app-loader');
+            const screen = document.getElementById('password-screen');
+
+            if (loader) loader.classList.add('hidden');
+            screen.style.display = 'flex';
+            setTimeout(() => document.getElementById('password-input').focus(), 100);
         }
 
         // Run check when DOM is ready
@@ -3685,6 +3686,7 @@
         fetchClientPublicIP();
 
         let dp = null;
+        let _lastProgressSaveTime = 0;  // timeupdate 节流时间戳（每15秒保存一次）
 
         // 💾 倍速恢复辅助 — 多次重试确保 HLS.js 不会重置
         function ensurePlaybackSpeed(player) {
@@ -3699,11 +3701,15 @@
                     }
                 };
 
+                // 立即尝试
                 applySpeed();
+
+                // HLS.js 可能在加载后重置 playbackRate，延时重试
                 setTimeout(applySpeed, 200);
                 setTimeout(applySpeed, 500);
                 setTimeout(applySpeed, 1500);
 
+                // 在 playing 事件时也检查一次（视频真正开始播放时）
                 const onPlaying = () => {
                     applySpeed();
                     player.video.removeEventListener('playing', onPlaying);
@@ -3718,6 +3724,7 @@
                     searchTimer: null,  // 防抖搜索定时器
                     isTestingSources: false,  // 正在测速状态
                     refreshingEpisodes: false,  // 刷新集数中
+                    refreshingSources: false,  // 刷新线路中
                     showInfoModal: false,  // 电影详情弹窗
                     infoModalData: null,   // 弹窗数据
                     TMDB_IMG_URL: TMDB_IMG_URL,  // 模板中使用
@@ -4487,6 +4494,8 @@
                         progressTime: Math.round(progress) || 0,
                         progressDuration: Math.round(duration) || 0,
                         watchedAt: new Date().toISOString(),
+                        // 记住用户最后使用的资源站
+                        lastSourceKey: this.currentSource?.site_key || null,
                         // 保存播放所需的数据（用于直接播放）
                         groupData: groupData ? {
                             name: groupData.name,
@@ -4709,8 +4718,18 @@
                         proxySources.sort((a, b) => a.latency - b.latency);
                         otherSources.sort((a, b) => a.latency - b.latency);
 
-                        // 选择最佳资源
-                        let bestSource = directSources[0] || proxySources[0] || otherSources[0] || sourcesWithKey[0];
+                        // 选择最佳资源：优先使用用户上次选择的资源站
+                        let bestSource = null;
+                        if (item.lastSourceKey) {
+                            bestSource = sourcesWithKey.find(s => s.site_key === item.lastSourceKey);
+                            if (bestSource) {
+                                console.log('[观看历史] 恢复上次资源站:', bestSource.site_name);
+                            }
+                        }
+                        // 回退：按延迟排序选最快的
+                        if (!bestSource) {
+                            bestSource = directSources[0] || proxySources[0] || otherSources[0] || sourcesWithKey[0];
+                        }
                         const testTypeLabel = bestSource?._testType === 'direct' ? '🎬直连' : (bestSource?._testType === 'proxy' ? '🔀代理' : '📡服务器');
                         console.log('[观看历史] 选择资源站:', bestSource?.site_name, '延迟:', bestSource?.latency, '类型:', testTypeLabel);
 
@@ -5119,10 +5138,7 @@
                             .then(() => console.log('[投屏] 呼出投屏菜单成功'))
                             .catch((err) => {
                                 // 错误处理：
-                                // DOMException: The prompt could not be shown. (通常是因为没开机、没搜到设备或非 HTTPS)
                                 console.log('[投屏] 无法显示投屏菜单:', err);
-
-                                // 只有在明确报错无法显示菜单时，才提示用户
                                 alert('未找到投屏设备。\n\n请先在手机下拉通知栏 → 点击「投屏/Cast」→ 搜索并连接您的电视，连接成功后再点击一键投屏即可。');
                             });
                         return;
@@ -5974,6 +5990,146 @@
                     this.refreshingEpisodes = false;
                 },
 
+                // 🔄 强制刷新线路列表（重新测速）
+                async refreshSources() {
+                    if (!this.currentGroup || this.isTestingSources) return;
+                    this.refreshingSources = true;
+                    this.isTestingSources = true;
+                    console.log('[刷新线路] 开始完整重新搜索...');
+
+                    try {
+                        const searchName = this.currentGroup.name;
+                        if (!searchName) {
+                            console.error('[刷新线路] 没有视频名称，无法搜索');
+                            return;
+                        }
+
+                        // 记住当前选中的资源站信息和集数
+                        const currentSiteKey = this.currentSource?.site_key;
+                        const currentEpName = this.currentEpisodeName || this.episodeList?.find(ep => ep.url === this.currentUrl)?.name;
+
+                        // 完整重新搜索
+                        const res = await fetch(`/api/search?wd=${encodeURIComponent(searchName)}&nocache=1`);
+                        const data = await res.json();
+
+                        if (!data.list || data.list.length === 0) {
+                            console.log('[刷新线路] 重新搜索未找到结果');
+                            return;
+                        }
+
+                        // 找到同名影片的搜索结果
+                        const matched = data.list.filter(item =>
+                            item.vod_name === searchName || item.vod_name?.trim() === searchName?.trim()
+                        );
+                        const results = matched.length > 0 ? matched : data.list;
+
+                        // 更新资源站列表
+                        this.currentGroup.sources = results.map(item => ({
+                            site_key: item.site_key,
+                            site_name: item.site_name,
+                            vod_id: item.vod_id,
+                            vod_name: item.vod_name,
+                            vod_play_url: item.vod_play_url || '',
+                            latency: undefined,
+                            _testType: undefined,
+                            _cachedDetail: undefined
+                        }));
+
+                        console.log(`[刷新线路] 重新搜索完成，找到 ${this.currentGroup.sources.length} 个资源站`);
+
+                        // 并行测速所有新资源站
+                        const sources = this.currentGroup.sources;
+                        const latencyPromises = sources.map(async (source) => {
+                            try {
+                                const detailRes = await fetch(`/api/detail?site_key=${source.site_key}&id=${source.vod_id}&nocache=1`);
+                                const detailData = await detailRes.json();
+                                if (!detailData.list || detailData.list.length === 0) {
+                                    source.latency = 9999;
+                                    return source;
+                                }
+                                const detail = detailData.list[0];
+                                source._cachedDetail = detail;
+                                source.vod_play_url = detail.vod_play_url;
+
+                                let playUrl = detail.vod_play_url || '';
+                                if (playUrl.includes('$$$')) {
+                                    const sets = playUrl.split('$$$');
+                                    playUrl = sets.find(s => s.toLowerCase().includes('m3u8')) || sets[0];
+                                }
+                                const firstEp = playUrl.split('#')[0];
+                                const parts = firstEp.split('$');
+                                const videoUrl = parts.length > 1 ? parts[1] : parts[0];
+
+                                if (!videoUrl || !videoUrl.startsWith('http')) {
+                                    source.latency = 9999;
+                                    return source;
+                                }
+
+                                if (window.location.protocol === 'https:' && videoUrl.startsWith('http:')) {
+                                    const checkRes = await fetch(`/api/check?key=${source.site_key}`);
+                                    const checkData = await checkRes.json();
+                                    source.latency = checkData.latency;
+                                    source._testType = 'server';
+                                    return source;
+                                }
+
+                                const startTime = Date.now();
+                                const controller = new AbortController();
+                                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                                try {
+                                    const testRes = await fetch(videoUrl, { method: 'GET', cache: 'no-cache', signal: controller.signal });
+                                    clearTimeout(timeoutId);
+                                    if (testRes.ok || testRes.type === 'opaque') {
+                                        source.latency = Date.now() - startTime;
+                                        source._testType = 'direct';
+                                    } else {
+                                        const checkRes = await fetch(`/api/check?key=${source.site_key}`);
+                                        const checkData = await checkRes.json();
+                                        source.latency = checkData.latency;
+                                        source._testType = 'server';
+                                    }
+                                } catch (fetchErr) {
+                                    clearTimeout(timeoutId);
+                                    try {
+                                        const checkRes = await fetch(`/api/check?key=${source.site_key}`);
+                                        const checkData = await checkRes.json();
+                                        source.latency = checkData.latency;
+                                        source._testType = 'server';
+                                    } catch (e) {
+                                        source.latency = 9999;
+                                    }
+                                }
+                            } catch (e) {
+                                source.latency = 9999;
+                            }
+                            return source;
+                        });
+
+                        await Promise.all(latencyPromises);
+
+                        // 按延迟排序
+                        this.currentGroup.sources.sort((a, b) => {
+                            const latA = typeof a.latency === 'number' ? a.latency : 9999;
+                            const latB = typeof b.latency === 'number' ? b.latency : 9999;
+                            return latA - latB;
+                        });
+
+                        // 尝试恢复之前选中的资源站
+                        if (currentSiteKey) {
+                            const found = this.currentGroup.sources.find(s => s.site_key === currentSiteKey);
+                            if (found) {
+                                console.log('[刷新线路] 恢复之前的资源站:', found.site_name);
+                            }
+                        }
+
+                        console.log('[刷新线路] 完成，最快线路:', this.currentGroup.sources[0]?.site_name, this.currentGroup.sources[0]?.latency + 'ms');
+                    } catch (e) {
+                        console.error('[刷新线路] 失败:', e);
+                    }
+                    this.isTestingSources = false;
+                    this.refreshingSources = false;
+                },
+
                 // 解析剧集列表，尝试匹配指定集数
                 parseEpisodes(urlStr, targetEpName) {
                     let playSource = urlStr;
@@ -6008,6 +6164,7 @@
                 play(url) {
                     this.currentUrl = url;
                     this.playbackErrorCount = 0;  // 重置错误计数
+                    this._proxyRetried = false;    // 重置代理重试标记
 
                     // 🔆 播放时保持屏幕常亮
                     this.requestWakeLock();
@@ -6025,17 +6182,45 @@
                         console.log('[播放器] 🌐 使用代理播放:', finalUrl.substring(0, 80) + '...');
                     }
 
-                    const setupErrorHandling = () => {
-                        // 监听播放错误，自动切换到下一个可用线路
-                        dp.on('error', () => {
-                            this.handlePlaybackError();
-                        });
+                    // 🛡️ 广告过滤：通过 Cloudflare Worker 代理过滤 DISCONTINUITY 广告标签
+                    // CF Worker 在边缘节点进行，不会被 CDN 屏蔽
+                    // 仅对直连 M3U8 URL 生效（非已通过代理的 URL）
+                    let adFilterProxyUsed = false;
+                    const originalUrl = finalUrl;  // 保存原始 URL 供代理失败回退
+                    const isDirectM3U8 = url && url.includes('.m3u8') && !(this.currentSource && this.currentSource._useProxy);
+                    if (window.AdFilter && window.AdFilter.isEnabled() && isDirectM3U8 && this.corsProxyUrl) {
+                        finalUrl = this.corsProxyUrl + '/?url=' + encodeURIComponent(finalUrl);
+                        adFilterProxyUsed = true;
+                        console.log('[播放器] 🛡️ 广告过滤: M3U8 路由到 CF Worker 代理');
+                    } else if (window.AdFilter && window.AdFilter.isEnabled() && isDirectM3U8 && !this.corsProxyUrl) {
+                        console.warn('[播放器] ⚠️ 广告过滤已启用但未配置 CORS_PROXY_URL，无法过滤');
+                    }
 
-                        // 监听 HLS 错误
+                    const setupErrorHandling = () => {
+                        // 统一错误处理函数（dp.error 和 video.error 都会触发）
+                        const handleError = (source) => {
+                            // 正在进行代理回退重试时，忽略所有错误（等待重试结果）
+                            if (this._proxyRetrying) {
+                                console.log('[播放器] ⏳ 代理回退中，忽略错误 (' + source + ')');
+                                return;
+                            }
+                            // 如果使用了广告过滤代理，先回退到直连重试
+                            if (adFilterProxyUsed && !this._proxyRetried) {
+                                this._proxyRetried = true;
+                                this._proxyRetrying = true;
+                                console.log('[播放器] 🛡️ 代理播放失败，回退直连:', originalUrl.substring(0, 60));
+                                dp.switchVideo({ url: originalUrl, type: 'hls' });
+                                // 3秒后解除锁定（足够 switchVideo 完成加载）
+                                setTimeout(() => { this._proxyRetrying = false; }, 3000);
+                                return;
+                            }
+                            this.handlePlaybackError();
+                        };
+
+                        dp.on('error', () => handleError('dp'));
+
                         if (dp.video) {
-                            dp.video.addEventListener('error', () => {
-                                this.handlePlaybackError();
-                            });
+                            dp.video.addEventListener('error', () => handleError('video'));
                         }
                     };
 
@@ -6050,87 +6235,15 @@
                             volume: 0.8,             // 默认音量 80%
                             loop: false,             // 循环播放（可在设置中切换）
                             playbackSpeed: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 3],  // 0.25间隔倍速选项
-                            video: {
-                                url: finalUrl,
-                                type: 'customHls',
-                                customType: {
-                                    customHls: function(video, player) {
-                                        // 先清理旧的 HLS 实例
-                                        if (window._hlsInstance) {
-                                            window._hlsInstance.destroy();
-                                            window._hlsInstance = null;
-                                        }
-                                        // 使用广告过滤 loader 创建 HLS 实例
-                                        var hlsConfig = {};
-                                        if (window.AdFilter && window.AdFilter.getFilteredLoaderClass) {
-                                            hlsConfig.loader = window.AdFilter.getFilteredLoaderClass();
-                                            console.log('[播放器] 🛡️ 已启用广告过滤 loader');
-                                        }
-                                        var hls = new Hls(hlsConfig);
-                                        hls.loadSource(video.src);
-                                        hls.attachMedia(video);
-                                        // HLS 错误恢复 — 渐进式策略，防止 recoverMediaError 导致音频异常
-                                        var _hlsRecoverAttempts = 0;
-                                        var _hlsRef = { instance: hls };  // 包装引用，确保闭包中始终访问最新实例
-                                        function _hlsErrorHandler(event, data) {
-                                            if (data.fatal) {
-                                                var currentHls = _hlsRef.instance;
-                                                switch (data.type) {
-                                                    case Hls.ErrorTypes.NETWORK_ERROR:
-                                                        console.warn('[HLS] 网络错误，尝试恢复...');
-                                                        currentHls.startLoad();
-                                                        break;
-                                                    case Hls.ErrorTypes.MEDIA_ERROR:
-                                                        _hlsRecoverAttempts++;
-                                                        if (_hlsRecoverAttempts === 1) {
-                                                            console.warn('[HLS] 媒体错误(第1次)，recoverMediaError...');
-                                                            currentHls.recoverMediaError();
-                                                        } else if (_hlsRecoverAttempts === 2) {
-                                                            console.warn('[HLS] 媒体错误(第2次)，swapAudioCodec + recoverMediaError...');
-                                                            currentHls.swapAudioCodec();
-                                                            currentHls.recoverMediaError();
-                                                        } else if (_hlsRecoverAttempts === 3) {
-                                                            console.warn('[HLS] 媒体错误(第3次)，重建 HLS 实例...');
-                                                            var savedSrc = video.src;
-                                                            currentHls.destroy();
-                                                            var freshHls = new Hls(hlsConfig);
-                                                            freshHls.loadSource(savedSrc);
-                                                            freshHls.attachMedia(video);
-                                                            freshHls.on(Hls.Events.ERROR, _hlsErrorHandler);
-                                                            _hlsRef.instance = freshHls;
-                                                            window._hlsInstance = freshHls;
-                                                            _hlsRecoverAttempts = 0;
-                                                        } else {
-                                                            console.error('[HLS] 媒体错误多次恢复失败');
-                                                            currentHls.destroy();
-                                                        }
-                                                        // 恢复后重置 DPlayer 控制栏状态
-                                                        try {
-                                                            var cont = document.getElementById('dplayer');
-                                                            if (cont) {
-                                                                cont.classList.remove('dplayer-hide-controller');
-                                                                var ctrl = cont.querySelector('.dplayer-controller');
-                                                                if (ctrl) ctrl.classList.remove('dplayer-controller-show');
-                                                            }
-                                                        } catch(e) {}
-                                                        break;
-                                                    default:
-                                                        console.error('[HLS] 致命错误，无法恢复');
-                                                        currentHls.destroy();
-                                                        break;
-                                                }
-                                            }
-                                        }
-                                        hls.on(Hls.Events.ERROR, _hlsErrorHandler);
-                                        window._hlsInstance = hls;
-                                    }
-                                }
-                            },
+                            video: { url: finalUrl, type: 'hls' },
                             contextmenu: [
                                 { text: '🎬 E视界MAX', link: '/' },
                                 { text: '⚡ 当前速度: 1x', click: () => { } }
                             ]
                         });
+
+                        // 🛡️ 广告过滤已在 CF Worker 完成（M3U8 URL 已通过 corsProxyUrl 路由）
+                        // CF Worker 移除 DISCONTINUITY 广告分段，TS 直连 CDN
 
                         // 监听倍速变化，更新 UI
                         if (dp.video) {
@@ -6977,7 +7090,7 @@
                             const currentEp = this.episodeList?.find(ep => ep.url === this.currentUrl);
                             const episodeName = (this.episodeList?.length > 1 && currentEp) ? currentEp.name : null;
 
-                            console.log('[进度记忆] 当前集数:', episodeName, '当前URL:', this.currentUrl?.substring(0, 30));
+
 
                             // 如果距离结尾 < 2分钟，视为完播，清除进度
                             if (duration > 0 && currentTime > duration - 120) {
@@ -6992,7 +7105,7 @@
 
                             // 只有播放位置 > 1分钟才保存（防止从头播放的资源覆盖进度）
                             if (currentTime <= 60) {
-                                console.log('[进度记忆] 当前位置 < 1分钟，不保存进度和历史');
+
                                 return;
                             }
 
@@ -7002,7 +7115,7 @@
                                     date: new Date().toISOString()
                                 };
                                 localStorage.setItem(getProgressKey(), JSON.stringify(data));
-                                console.log('[进度记忆] 保存进度:', currentTime.toFixed(0), '秒, 集数:', episodeName);
+
 
                                 // 同时更新观看历史（只有进度 > 1分钟才更新，防止覆盖为0）
                                 if (movieName) {
@@ -7013,12 +7126,16 @@
                             }
                         };
 
-                        // 定时保存进度 (每15秒)
-                        const progressSaveInterval = setInterval(() => {
-                            if (dp.video && !dp.video.paused) {
-                                saveProgress(dp.video.currentTime);
+                        // 使用 timeupdate 事件保存进度（每15秒节流）
+                        dp.on('timeupdate', () => {
+                            const now = Date.now();
+                            if (now - _lastProgressSaveTime >= 15000) {
+                                _lastProgressSaveTime = now;
+                                if (dp.video && !dp.video.paused) {
+                                    saveProgress(dp.video.currentTime);
+                                }
                             }
-                        }, 15000);
+                        });
 
                         // 暂停时保存
                         dp.on('pause', () => {
@@ -7095,79 +7212,10 @@
 
                         let progressRestored = false;
 
-                        dp.switchVideo({
-                            url: finalUrl,
-                            type: 'customHls',
-                            customType: {
-                                customHls: function(video, player) {
-                                    if (window._hlsInstance) {
-                                        window._hlsInstance.destroy();
-                                        window._hlsInstance = null;
-                                    }
-                                    var hlsConfig = {};
-                                    if (window.AdFilter && window.AdFilter.getFilteredLoaderClass) {
-                                        hlsConfig.loader = window.AdFilter.getFilteredLoaderClass();
-                                        console.log('[播放器] 🛡️ 已启用广告过滤 loader (切换)');
-                                    }
-                                    var hls = new Hls(hlsConfig);
-                                    hls.loadSource(video.src);
-                                    hls.attachMedia(video);
-                                    // HLS 错误恢复 — 渐进式策略
-                                    var _hlsRecoverAttempts2 = 0;
-                                    var _hlsRef2 = { instance: hls };
-                                    function _hlsErrorHandler2(event, data) {
-                                        if (data.fatal) {
-                                            var currentHls = _hlsRef2.instance;
-                                            switch (data.type) {
-                                                case Hls.ErrorTypes.NETWORK_ERROR:
-                                                    currentHls.startLoad();
-                                                    break;
-                                                case Hls.ErrorTypes.MEDIA_ERROR:
-                                                    _hlsRecoverAttempts2++;
-                                                    if (_hlsRecoverAttempts2 === 1) {
-                                                        console.warn('[HLS-切换] 媒体错误(第1次)，recoverMediaError...');
-                                                        currentHls.recoverMediaError();
-                                                    } else if (_hlsRecoverAttempts2 === 2) {
-                                                        console.warn('[HLS-切换] 媒体错误(第2次)，swapAudioCodec + recoverMediaError...');
-                                                        currentHls.swapAudioCodec();
-                                                        currentHls.recoverMediaError();
-                                                    } else if (_hlsRecoverAttempts2 === 3) {
-                                                        console.warn('[HLS-切换] 媒体错误(第3次)，重建 HLS 实例...');
-                                                        var savedSrc2 = video.src;
-                                                        currentHls.destroy();
-                                                        var freshHls2 = new Hls(hlsConfig);
-                                                        freshHls2.loadSource(savedSrc2);
-                                                        freshHls2.attachMedia(video);
-                                                        freshHls2.on(Hls.Events.ERROR, _hlsErrorHandler2);
-                                                        _hlsRef2.instance = freshHls2;
-                                                        window._hlsInstance = freshHls2;
-                                                        _hlsRecoverAttempts2 = 0;
-                                                    } else {
-                                                        console.error('[HLS-切换] 媒体错误多次恢复失败');
-                                                        currentHls.destroy();
-                                                    }
-                                                    // 恢复后重置 DPlayer 控制栏状态
-                                                    try {
-                                                        var cont2 = document.getElementById('dplayer');
-                                                        if (cont2) {
-                                                            cont2.classList.remove('dplayer-hide-controller');
-                                                            var ctrl2 = cont2.querySelector('.dplayer-controller');
-                                                            if (ctrl2) ctrl2.classList.remove('dplayer-controller-show');
-                                                        }
-                                                    } catch(e) {}
-                                                    break;
-                                                default:
-                                                    currentHls.destroy();
-                                                    break;
-                                            }
-                                        }
-                                    }
-                                    hls.on(Hls.Events.ERROR, _hlsErrorHandler2);
-                                    window._hlsInstance = hls;
-                                }
-                            }
-                        });
+                        dp.switchVideo({ url: finalUrl, type: 'hls' });
                         console.log('[进度记忆-切换] switchVideo 已调用' + (finalUrl !== url ? ' (代理模式)' : ''));
+
+                        // 🛡️ 广告过滤已在 CF Worker 完成（M3U8 URL 已通过 corsProxyUrl 路由）
 
                         // 恢复新视频的进度
                         const restoreHandler = () => {
@@ -7225,20 +7273,28 @@
                             }
                         };
 
-                        dp.on('canplay', restoreHandler);
-                        console.log('[进度记忆-切换] canplay 监听器已添加');
+                        // 移除旧的 canplay 监听器，防止每次切集累积
+                        if (window._restoreCanplayHandler && dp.video) {
+                            dp.video.removeEventListener('canplay', window._restoreCanplayHandler);
+                        }
+                        window._restoreCanplayHandler = restoreHandler;
+                        dp.video.addEventListener('canplay', restoreHandler);
 
                         // 💾 重新绑定 ratechange 监听器（switchVideo 后 video 元素会更新）
-                        // 使用 DPlayer 的事件而非直接监听 video，确保兼容性
+                        // 使用命名函数引用 + 移除旧监听器，防止累积
+                        const _rateChangeHandler = () => {
+                            const speed = dp.video.playbackRate;
+                            try {
+                                localStorage.setItem('dplayer_speed', speed);
+                            } catch (e) { }
+                        };
                         setTimeout(() => {
                             if (dp.video) {
-                                dp.video.addEventListener('ratechange', () => {
-                                    const speed = dp.video.playbackRate;
-                                    try {
-                                        localStorage.setItem('dplayer_speed', speed);
-                                        console.log('[倍速保存] 切换后保存倍速:', speed + 'x');
-                                    } catch (e) { }
-                                });
+                                if (window._rateChangeHandler) {
+                                    dp.video.removeEventListener('ratechange', window._rateChangeHandler);
+                                }
+                                window._rateChangeHandler = _rateChangeHandler;
+                                dp.video.addEventListener('ratechange', _rateChangeHandler);
                             }
                         }, 100);
                     }
@@ -7631,8 +7687,8 @@
                         // 立即检查更新
                         reg.update();
 
-                        // 定期检查更新（每30分钟）
-                        setInterval(() => reg.update(), 30 * 60 * 1000);
+                        // 定期检查更新（每天一次）
+                        setInterval(() => reg.update(), 24 * 60 * 60 * 1000);
 
                         // 监听新版本安装
                         reg.addEventListener('updatefound', () => {

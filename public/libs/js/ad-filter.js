@@ -1,22 +1,22 @@
 /**
- * M3U8 广告过滤模块 v2.0
+ * M3U8 广告过滤模块 v3.1
  * 
- * 基于 M3U8 播放列表分析，自动检测和跳过广告分段
+ * 架构：Cloudflare Worker 边缘代理过滤
+ * M3U8 URL 通过 CORS_PROXY_URL (CF Worker) 路由：
+ *   1. CF Worker 获取原始 M3U8 内容
+ *   2. 移除所有 #EXT-X-DISCONTINUITY 标签（广告插入标记）
+ *   3. 将相对 URL 重写为代理 URL（TS 分片也经过 Worker）
+ *   4. 返回干净的 M3U8 给 HLS.js
  * 
- * 广告检测方法:
- * 1. #EXT-X-DISCONTINUITY 标签后的短分段（通常是广告）
- * 2. 不同域名的分段（混入的广告CDN）
- * 3. 极短分段序列（5-30秒的广告）
- * 4. 基于域名黑名单的分段过滤
+ * 客户端模块负责：
+ * - 提供 isEnabled() 供 play() 函数决定是否路由到代理
+ * - 广告过滤 UI 开关（设置面板中的切换按钮）
+ * - 设置持久化（localStorage）
  * 
- * 测试验证的资源站:
- * - 暴风资源 (p.bvvvvvvvvv1f.com) - 使用 #EXT-X-DISCONTINUITY
- * - 1080资源 (yzzy.play-cdn17.com) - 使用 #EXT-X-DISCONTINUITY  
- * - 魔都资源 (play.modujx10.com) - 使用 #EXT-X-DISCONTINUITY
- * - 豪华资源 (play.hhuus.com) - 无广告（AES-128加密）
+ * 参考：https://github.com/eraycc/m3u8-proxy-script
  * 
  * @author DongguaTV
- * @version 2.0.0
+ * @version 3.1.0
  */
 
 (function () {
@@ -309,6 +309,11 @@
                 continue;
             }
 
+            // 跳过时长超过广告上限的组（这些是内容组，不是广告）
+            if (groupDuration > AD_FILTER_CONFIG.maxAdDuration) {
+                continue;
+            }
+
             // 广告特征检测:
             // 1. 总时长在广告范围内（3-120秒）
             // 2. 分段数较少（通常 < 15）
@@ -320,8 +325,9 @@
             const isAdByRatio = groupDuration < maxDuration * 0.1;  // 时长不到主内容的 10%
 
             // 计算该组在整个视频中的位置
+            const gKeyIndex = groupKeys.indexOf(gKey);
             let positionBefore = 0;
-            for (let i = 0; i < groupKeys.indexOf(gKey); i++) {
+            for (let i = 0; i < gKeyIndex; i++) {
                 positionBefore += groupDurations[groupKeys[i]];
             }
             const positionPercent = totalDuration > 0 ? (positionBefore / totalDuration * 100) : 0;
@@ -330,25 +336,103 @@
             const isAtStart = positionBefore < 10;  // 开头10秒内
             const isAtEnd = positionPercent > 90;   // 结尾10%
 
-            // 新增：中间位置广告检测（针对 1080 资源站等中插广告）
-            // 策略：只要不是主内容组，且时长在广告范围内，就认为是广告
-            // 理由：正常 M3U8 不会有多个 discontinuity 分组，如果有，非主内容的短分组大概率是广告
-            const isMidAd = isAdByDuration && isAdBySegmentCount && (groupDuration / totalDuration) < 0.1;
-
             // 调试日志
             log(`  💡 组 #${gKey} 分析: 时长${groupDuration.toFixed(1)}秒, 位置${positionBefore.toFixed(0)}秒(${positionPercent.toFixed(0)}%), ` +
                 `符合时长=${isAdByDuration}, 符合分段数=${isAdBySegmentCount}, 符合比例=${isAdByRatio}, ` +
-                `开头=${isAtStart}, 结尾=${isAtEnd}, 中插广告=${isMidAd}`);
+                `开头=${isAtStart}, 结尾=${isAtEnd}`);
 
             // 判断条件：满足广告时长范围 + 分段数条件，直接过滤
-            // 因为正常视频不会出现多个 discontinuity 分组，非主内容的分组就是广告
+            // 广告是动态插入的，CDN 每次播放时在 DISCONTINUITY 点插入不同的广告
+            // 非主内容的短分组就是广告
             if (isAdByDuration && isAdBySegmentCount) {
-                log(`🎯 检测到广告组 #${gKey}: ${group.length} 分段, ${groupDuration.toFixed(1)}秒, 位置: ${positionBefore.toFixed(0)}秒`);
+                log(`🎯 检测到广告组 #${gKey}: ${group.length} 分段, ${groupDuration.toFixed(1)}秒, 位置: ${positionBefore.toFixed(0)}秒` +
+                    (isAtStart ? ' [片头]' : '') + (isAtEnd ? ' [片尾]' : ''));
                 group.forEach(seg => adSegmentIndices.add(seg.index));
             }
         }
 
         return adSegmentIndices;
+    }
+
+    /**
+     * 检测广告时间段（用于跳过模式）
+     * 分析 M3U8 内容，返回广告在播放时间轴上的起止时间
+     * @param {string} content - 原始 M3U8 内容
+     * @returns {Object} { adRanges: [{start, end, duration}], adsRemoved: number, adsDuration: number }
+     */
+    function detectAdTimeRanges(content) {
+        if (!AD_FILTER_CONFIG.enabled || !AD_FILTER_CONFIG.skipDiscontinuityAds) {
+            return { adRanges: [], adsRemoved: 0, adsDuration: 0 };
+        }
+
+        // 主播放列表不处理
+        if (content.includes('#EXT-X-STREAM-INF')) {
+            return { adRanges: [], adsRemoved: 0, adsDuration: 0 };
+        }
+
+        if (!content.includes('#EXT-X-DISCONTINUITY')) {
+            return { adRanges: [], adsRemoved: 0, adsDuration: 0 };
+        }
+
+        try {
+            const parsed = parseM3U8(content);
+            const adIndices = detectAdSegments(parsed.segments);
+
+            if (adIndices.size === 0) {
+                return { adRanges: [], adsRemoved: 0, adsDuration: 0 };
+            }
+
+            // 计算每个分段在时间轴上的累积起始时间
+            const adRanges = [];
+            let cumulativeTime = 0;
+            let currentRangeStart = -1;
+            let currentRangeEnd = -1;
+
+            for (let i = 0; i < parsed.segments.length; i++) {
+                const seg = parsed.segments[i];
+                if (adIndices.has(i)) {
+                    if (currentRangeStart < 0) {
+                        currentRangeStart = cumulativeTime;
+                    }
+                    currentRangeEnd = cumulativeTime + seg.duration;
+                } else {
+                    // 当前分段不是广告，如果之前有广告段，关闭该 range
+                    if (currentRangeStart >= 0) {
+                        adRanges.push({
+                            start: currentRangeStart,
+                            end: currentRangeEnd,
+                            duration: currentRangeEnd - currentRangeStart
+                        });
+                        currentRangeStart = -1;
+                        currentRangeEnd = -1;
+                    }
+                }
+                cumulativeTime += seg.duration;
+            }
+            // 处理最后一个 range（如果广告在末尾）
+            if (currentRangeStart >= 0) {
+                adRanges.push({
+                    start: currentRangeStart,
+                    end: currentRangeEnd,
+                    duration: currentRangeEnd - currentRangeStart
+                });
+            }
+
+            let adsDuration = 0;
+            adIndices.forEach(idx => {
+                adsDuration += parsed.segments[idx].duration;
+            });
+
+            // 记录检测到的广告时间段
+            for (const range of adRanges) {
+                log(`📍 广告时间段: ${range.start.toFixed(1)}s - ${range.end.toFixed(1)}s (${range.duration.toFixed(1)}秒)`);
+            }
+
+            return { adRanges, adsRemoved: adIndices.size, adsDuration };
+        } catch (e) {
+            console.error('[广告过滤] detectAdTimeRanges 错误:', e);
+            return { adRanges: [], adsRemoved: 0, adsDuration: 0 };
+        }
     }
 
     /**
@@ -490,7 +574,13 @@
                 finalLines.push(line);
             }
 
-            const filtered = finalLines.join('\n');
+            // 🔧 移除所有剩余的 DISCONTINUITY 标签
+            // 广告移除后内容组之间不需要 DISCONTINUITY，
+            // 且 HLS.js 在 DISCONTINUITY 处有音频采样率重置 bug 导致声音低沉
+            const noDiscoLines = finalLines.filter(line => 
+                !line.startsWith('#EXT-X-DISCONTINUITY')
+            );
+            const filtered = noDiscoLines.join('\n');
 
             // 更新统计
             stats.totalAdsFiltered += adIndices.size;
@@ -511,106 +601,6 @@
         }
     }
 
-    /**
-     * 拦截 HLS.js 的 loader，过滤 M3U8 响应
-     */
-    function hookHlsLoader() {
-        if (typeof Hls === 'undefined') {
-            log('HLS.js 未加载，延迟挂钩...');
-            setTimeout(hookHlsLoader, 100);
-            return;
-        }
-
-        // 保存原始 loader
-        const OriginalLoader = Hls.DefaultConfig.loader;
-
-        // 创建过滤 loader
-        class FilteredLoader extends OriginalLoader {
-            constructor(config) {
-                super(config);
-            }
-
-            load(context, config, callbacks) {
-                const originalOnSuccess = callbacks.onSuccess;
-
-                callbacks.onSuccess = (response, stats, context, networkDetails) => {
-                    // 只处理 m3u8 文件（manifest 或 level）
-                    if (context.type === 'manifest' || context.type === 'level') {
-                        if (typeof response.data === 'string' && response.data.includes('#EXTM3U')) {
-                            const result = filterM3U8(response.data);
-                            if (result.adsRemoved > 0) {
-                                response.data = result.filtered;
-
-                                // 显示过滤通知
-                                if (AD_FILTER_CONFIG.showNotification) {
-                                    setTimeout(() => {
-                                        if (window.dp && window.dp.notice) {
-                                            window.dp.notice(`🛡️ 已过滤 ${result.adsRemoved} 个广告 (${result.adsDuration.toFixed(0)}秒)`, 3000);
-                                        }
-                                    }, 1000);
-                                }
-                            }
-                        }
-                    }
-
-                    originalOnSuccess(response, stats, context, networkDetails);
-                };
-
-                super.load(context, config, callbacks);
-            }
-        }
-
-        // 替换默认 loader
-        Hls.DefaultConfig.loader = FilteredLoader;
-
-        log('✅ HLS.js 广告过滤 loader 已安装');
-    }
-
-    /**
-     * 基于时间的广告跳过（备用方案）
-     * 当无法在 M3U8 层面过滤时，在播放时检测并跳过
-     */
-    function setupTimeBasedSkip() {
-        // 等待 DPlayer 初始化
-        const checkPlayer = setInterval(() => {
-            if (window.dp && window.dp.video) {
-                clearInterval(checkPlayer);
-
-                let lastKnownGoodTime = 0;
-                let adDetected = false;
-
-                // 配置的开头跳过
-                if (AD_FILTER_CONFIG.skipFirstSegments && AD_FILTER_CONFIG.firstSegmentSkipDuration > 0) {
-                    window.dp.on('canplay', () => {
-                        if (window.dp.video.currentTime < 5) {
-                            log(`跳过开头 ${AD_FILTER_CONFIG.firstSegmentSkipDuration} 秒`);
-                            window.dp.seek(AD_FILTER_CONFIG.firstSegmentSkipDuration);
-                        }
-                    });
-                }
-
-                // 监听时间更新，检测异常跳转（可能的广告插入）
-                window.dp.video.addEventListener('timeupdate', function () {
-                    const video = window.dp.video;
-                    if (!video) return;
-
-                    // 如果视频突然跳到开头附近（可能是广告插入点）
-                    // 并且之前已经播放了一段时间，可能是广告
-                    if (lastKnownGoodTime > 30 && video.currentTime < 5) {
-                        if (!adDetected) {
-                            adDetected = true;
-                            log('⚠️ 检测到可能的中途广告跳转');
-                        }
-                    } else if (video.currentTime > 10) {
-                        lastKnownGoodTime = video.currentTime;
-                        adDetected = false;
-                    }
-                });
-
-                log('✅ 时间跳过检测已启用');
-            }
-        }, 500);
-    }
 
     /**
      * 注入广告过滤开关到设置面板 (可从外部调用)
@@ -769,6 +759,7 @@
         filterM3U8,
         parseM3U8,
         isAdDomain,
+        isEnabled: () => AD_FILTER_CONFIG.enabled,
         enable: () => {
             AD_FILTER_CONFIG.enabled = true;
             try { localStorage.setItem('donggua_ad_filter_enabled', 'true'); } catch (e) { }
@@ -786,15 +777,13 @@
             AD_FILTER_CONFIG.skipFirstSegments = seconds > 0;
             AD_FILTER_CONFIG.firstSegmentSkipDuration = seconds;
         },
-        // 导出 initUI 供外部调用 (如 index.html 中的设置菜单监听)
         initUI: injectAdFilterUI
     };
 
     // 初始化
-    log('🚀 广告过滤模块 v2.0 加载中...');
+    log('🚀 广告过滤模块 v3.1 加载中...');
+    log('📡 架构: Cloudflare Worker 边缘代理过滤 (CORS_PROXY_URL)');
     loadSettings();
-    hookHlsLoader();
-    setupTimeBasedSkip();
     createSettingsUI();
 
     log(`📊 配置: 启用=${AD_FILTER_CONFIG.enabled}, DISCONTINUITY过滤=${AD_FILTER_CONFIG.skipDiscontinuityAds}`);
